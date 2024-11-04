@@ -1,34 +1,36 @@
 package com.example.readsummarized
 
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Log
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import org.json.JSONObject
+import com.example.readsummarized.network.TextSummarizer
 import com.example.readsummarized.ui.theme.ReadSummarizedTheme
-import okhttp3.RequestBody.Companion.toRequestBody
-import com.google.gson.JsonParser
+
 
 class MainActivity : ComponentActivity() {
-
     private val textSummarizer = TextSummarizer()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        fetchPdfFiles()
+
         setContent {
             ReadSummarizedTheme {
                 var summary by remember { mutableStateOf("Здесь будет резюме.") }
@@ -42,7 +44,6 @@ class MainActivity : ComponentActivity() {
                             .padding(paddingValues)
                     )
 
-                    // Simulate a summarization process
                     LaunchedEffect(Unit) {
                         summary = textSummarizer.summarizeText(inputText)
                     }
@@ -51,38 +52,56 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    class TextSummarizer {
-        private val client = OkHttpClient()
-        private val summarizeApiToken = "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"
+    //Method for getting all pdf files from device for all android versions
+    protected fun pdfFiles(): ArrayList<String> {
+        val pdfList = ArrayList<String>()
 
-        suspend fun summarizeText(text: String): String {
-            return withContext(Dispatchers.IO) {
-                val url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-                val json = JSONObject().apply {
-                    put("inputs", text)
-                    put("parameters", JSONObject().apply {
-                        put("truncation", "only_first")
-                    })
-                }
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.DATE_ADDED,
+            MediaStore.Files.FileColumns.DATA,
+            MediaStore.Files.FileColumns.MIME_TYPE,
+        )
 
-                val requestBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("Authorization", "Bearer $summarizeApiToken")
-                    .post(requestBody)
-                    .build()
+        val sortOrder = MediaStore.Files.FileColumns.DATE_ADDED + " DESC"
 
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val jsonObject = JsonParser.parseString(response.body!!.string()).asJsonArray[0].asJsonObject
-                    jsonObject["summary_text"].asString
-                } else {
-                    "Request failed: ${response.code} ${response.message}"
+        val selection = MediaStore.Files.FileColumns.MIME_TYPE + " = ?"
+
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension("pdf")
+        val selectionArgs = arrayOf(mimeType)
+
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Files.getContentUri("external")
+        }
+
+
+        contentResolver.query(collection, projection, selection, selectionArgs, sortOrder)
+            .use { cursor ->
+                checkNotNull(cursor)
+                if (cursor.moveToFirst()) {
+                    val columnData = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
+                    val columnName =
+                        cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                    do {
+                        pdfList.add((cursor.getString(columnData)))
+                        Log.d("PDF", "getPdf: " + cursor.getString(columnData))
+                        //you can get your pdf files
+                    } while (cursor.moveToNext())
                 }
             }
+        return pdfList
+    }
+
+    private fun fetchPdfFiles() {
+        val pdfFiles = pdfFiles()
+        Log.d("hihi", pdfFiles.toArray().contentToString())
+        for (path in pdfFiles) {
+            Log.d("PDF File Path", path)
         }
     }
-}
+
 
 @Preview(showBackground = true)
 @Composable
@@ -91,4 +110,4 @@ fun DefaultPreview() {
         Text(text = "Пример резюме")
     }
 }
-
+}
